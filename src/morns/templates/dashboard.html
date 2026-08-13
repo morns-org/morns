@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>MORNs Station</title>
+  <style>
+    :root{color-scheme:dark;--bg:#0a1014;--panel:#121b21;--ink:#eaf2ed;--muted:#8da39a;--green:#72e3a6;--line:#26343b}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 15% 0,#173229 0,transparent 35%),var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+    header,main{max-width:1180px;margin:auto;padding:24px}header{display:flex;justify-content:space-between;align-items:end}h1{margin:0;font-size:34px;letter-spacing:.08em}h1 span{color:var(--green)}
+    .status{color:var(--green)}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:rgba(18,27,33,.94);border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 18px 45px #0004}.wide{grid-column:span 3}.metric{font-size:30px;font-weight:700}.muted{color:var(--muted)}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 16px}button{background:#18262b;color:var(--ink);border:1px solid #365047;border-radius:999px;padding:7px 12px;cursor:pointer}button.active{background:var(--green);color:#082016}
+    table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line)}th{color:var(--muted);font-weight:500}.message{font-family:ui-monospace,monospace} @media(max-width:700px){.grid{grid-template-columns:1fr}.card,.wide{grid-column:span 1}header{align-items:start;flex-direction:column}}
+  </style>
+</head>
+<body>
+<header><div><div class="muted">Meshtastic Observation & Receiver Networks</div><h1>MOR<span>N</span>s</h1></div><div id="health" class="status">Connecting…</div></header>
+<main><section class="grid">
+  <article class="card"><div class="muted">Observations</div><div id="observations" class="metric">—</div></article>
+  <article class="card"><div class="muted">Nodes heard</div><div id="nodes" class="metric">—</div></article>
+  <article class="card"><div class="muted">Messages</div><div id="messageCount" class="metric">—</div></article>
+  <article class="card wide"><h2>Public message history</h2><div class="toolbar" id="windows"></div><table><thead><tr><th>Time</th><th>Node</th><th>Message</th><th>Signal</th></tr></thead><tbody id="messages"></tbody></table></article>
+  <article class="card wide"><h2>Recent observations</h2><table><thead><tr><th>Time</th><th>Node</th><th>Type</th><th>RSSI</th><th>SNR</th><th>Transport</th></tr></thead><tbody id="events"></tbody></table></article>
+</section></main>
+<script>
+const windows=[[5,'5 min'],[10,'10 min'],[30,'30 min'],[60,'1 hour'],[360,'6 hours'],[720,'12 hours'],[1440,'24 hours'],[10080,'7 days'],[43200,'1 month']];let selected=60;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function buttons(){document.querySelector('#windows').innerHTML=windows.map(([n,l])=>`<button class="${n===selected?'active':''}" data-n="${n}">${l}</button>`).join('');document.querySelectorAll('button').forEach(b=>b.onclick=()=>{selected=+b.dataset.n;buttons();load()})}
+function time(s){return s?new Date(s).toLocaleString():'—'}
+async function load(){try{const [h,s,m,e]=await Promise.all(['/health','/api/v1/stats',`/api/v1/messages?minutes=${selected}`,`/api/v1/observations?minutes=${selected}&limit=100`].map(u=>fetch(u).then(r=>r.json())));health.textContent=`● ${h.station} online`;observations.textContent=s.observations;nodes.textContent=s.nodes;messageCount.textContent=s.messages??0;messages.innerHTML=m.map(x=>`<tr><td>${time(x.received_at)}</td><td>${esc(x.from_node)}</td><td class="message">${esc(x.message_text)}</td><td>${x.rssi??'—'} dBm / ${x.snr??'—'} dB</td></tr>`).join('')||'<tr><td colspan="4" class="muted">No decoded messages in this window.</td></tr>';events.innerHTML=e.map(x=>`<tr><td>${time(x.received_at)}</td><td>${esc(x.from_node)}</td><td>${esc(x.portnum)}</td><td>${x.rssi??'—'}</td><td>${x.snr??'—'}</td><td>${esc(x.transport)}</td></tr>`).join('')}catch(err){health.textContent='● Station unavailable';health.style.color='#ff8c7a'}}
+buttons();load();setInterval(load,5000);
+</script>
+</body>
+</html>

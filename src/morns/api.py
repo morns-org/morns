@@ -1,0 +1,50 @@
+from __future__ import annotations
+
+from importlib.resources import files
+
+from fastapi import FastAPI, Query
+from fastapi.responses import HTMLResponse
+
+from . import __version__
+from .config import Settings
+from .store import ObservationStore
+
+ALLOWED_WINDOWS = {5, 10, 30, 60, 360, 720, 1440, 10080, 43200}
+
+
+def create_app(settings: Settings | None = None, store: ObservationStore | None = None) -> FastAPI:
+    settings = settings or Settings.from_env()
+    store = store or ObservationStore(settings.database_path)
+    app = FastAPI(title="MORNs Station", version=__version__)
+    app.state.settings = settings
+    app.state.store = store
+
+    @app.get("/", response_class=HTMLResponse)
+    def dashboard() -> str:
+        return files("morns").joinpath("templates/dashboard.html").read_text(encoding="utf-8")
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok", "version": __version__, "station": settings.station_name}
+
+    @app.get("/api/v1/stats")
+    def stats() -> dict:
+        return {"station": settings.station_name, **store.stats()}
+
+    @app.get("/api/v1/observations")
+    def observations(
+        minutes: int = Query(60), limit: int = Query(500, ge=1, le=5000)
+    ) -> list[dict]:
+        if minutes not in ALLOWED_WINDOWS:
+            minutes = 60
+        return store.recent(minutes=minutes, limit=limit)
+
+    @app.get("/api/v1/messages")
+    def messages(
+        minutes: int = Query(60), limit: int = Query(500, ge=1, le=5000)
+    ) -> list[dict]:
+        if minutes not in ALLOWED_WINDOWS:
+            minutes = 60
+        return store.recent(minutes=minutes, limit=limit, messages_only=True)
+
+    return app
