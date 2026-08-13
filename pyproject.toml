@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Local-first Meshtastic observation and receiver station"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = {text = "Apache-2.0"}
 dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn>=0.30,<1",

@@ -95,4 +95,4 @@ Accepted history windows are 5, 10, and 30 minutes; 1, 6, 12, and 24 hours; 7 da
 
 ## License
 
-MIT
+Apache License 2.0
