@@ -8,13 +8,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .normalize import normalize_packet
-from .store import ObservationStore
-
 log = logging.getLogger(__name__)
 
 
 class SerialCollector:
-    def __init__(self, store: ObservationStore, port: str, receiver_id: str):
+    def __init__(self, store: Any, port: str, receiver_id: str):
         self.store = store
         self.port = port
         self.receiver_id = receiver_id
@@ -37,7 +35,7 @@ class SerialCollector:
 
 
 class SimulatorCollector:
-    def __init__(self, store: ObservationStore, receiver_id: str, interval: float = 3.0):
+    def __init__(self, store: Any, receiver_id: str, interval: float = 3.0):
         self.store = store
         self.receiver_id = receiver_id
         self.interval = interval

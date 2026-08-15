@@ -34,3 +34,35 @@ def test_message_api_does_not_return_non_messages(tmp_path):
 def test_query_limits_are_bounded(tmp_path):
     client, _ = make_client(tmp_path)
     assert client.get("/api/v1/observations?limit=5001").status_code == 422
+
+
+def test_ingest_requires_configured_token(tmp_path):
+    client, _ = make_client(tmp_path)
+    assert client.post("/api/v1/ingest", json={}).status_code == 503
+
+
+def test_ingest_authenticates_and_forces_lora_provenance(tmp_path):
+    path = tmp_path / "ingest.db"
+    store = ObservationStore(path)
+    settings = Settings(path, "QE Station", None, "127.0.0.1", 8787, False, "secret")
+    client = TestClient(create_app(settings, store))
+    packet = {"receiver_id": "physical-one", "from_node": "!abc", "message_text": "real"}
+    assert client.post("/api/v1/ingest", json=packet).status_code == 401
+    response = client.post(
+        "/api/v1/ingest", json=packet, headers={"Authorization": "Bearer secret"}
+    )
+    assert response.status_code == 202
+    assert store.recent()[0]["transport"] == "LORA"
+
+
+def test_ingest_rejects_simulator_provenance(tmp_path):
+    path = tmp_path / "ingest.db"
+    store = ObservationStore(path)
+    settings = Settings(path, "QE Station", None, "127.0.0.1", 8787, False, "secret")
+    client = TestClient(create_app(settings, store))
+    response = client.post(
+        "/api/v1/ingest",
+        json={"receiver_id": "fake", "transport": "SIMULATOR"},
+        headers={"Authorization": "Bearer secret"},
+    )
+    assert response.status_code == 422

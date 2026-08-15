@@ -28,6 +28,7 @@ def main() -> None:
         host=args.host or base.host,
         port=args.web_port or base.port,
         simulator=args.simulator or base.simulator,
+        ingest_token=base.ingest_token,
     )
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     store = ObservationStore(settings.database_path)

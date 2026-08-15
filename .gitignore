@@ -1,4 +1,5 @@
 .venv/
+.collector-venv/
 __pycache__/
 *.py[cod]
 *.db

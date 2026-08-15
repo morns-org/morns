@@ -5,8 +5,9 @@ services:
       MORNS_DATABASE: /data/morns.db
       MORNS_HOST: 0.0.0.0
       MORNS_STATION_NAME: MORNs Station
+      MORNS_INGEST_TOKEN: ${MORNS_INGEST_TOKEN:-}
     ports:
-      - "8787:8787"
+      - "127.0.0.1:8787:8787"
     volumes:
       - station-data:/data
     read_only: true

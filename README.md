@@ -16,6 +16,7 @@ This repository is an early MVP. It currently provides a single-station SQLite e
 - Safe simulator mode for evaluation without a radio
 - Docker Compose QE environment
 - Raspberry Pi OS systemd installer
+- Native host collector for macOS/Linux radios feeding a Docker server
 
 MORNs logs decoded messages supplied by the connected device. It does not break Meshtastic encryption, obtain private keys, or decode channels the receiver does not belong to.
 
@@ -43,6 +44,34 @@ morns --port /dev/ttyACM0 --host 0.0.0.0
 ```
 
 On macOS the device commonly resembles `/dev/cu.usbmodem*`. On Raspberry Pi OS it commonly resembles `/dev/ttyACM0`. MORNs does not change radio settings.
+
+## macOS radio with a Docker server
+
+Docker Desktop runs Linux inside a virtual machine and does not expose macOS serial devices as ordinary Linux device paths. MORNs therefore separates the native radio collector from the containerized server.
+
+Create a local environment file with a unique token:
+
+```bash
+cp .env.example .env
+sed -i '' "s/replace-with-a-long-random-token/$(openssl rand -hex 32)/" .env
+docker compose up --build -d --wait
+```
+
+Install the collector in a Python environment on the Mac and point it at the serial device:
+
+```bash
+python3 -m venv .collector-venv
+. .collector-venv/bin/activate
+pip install .
+set -a; . ./.env; set +a
+morns-collector \
+  --port /dev/cu.usbmodem1101 \
+  --server http://127.0.0.1:8787 \
+  --token "$MORNS_INGEST_TOKEN" \
+  --receiver-id nw-okc-home
+```
+
+Use the actual device returned by `ls /dev/cu.usbmodem*`. The collector reads packets through Meshtastic's client API and never changes radio settings. The Docker port binds to localhost by default; exposing it to a LAN or the internet requires an explicit deployment configuration and authentication review.
 
 ## Raspberry Pi installation
 
@@ -99,6 +128,7 @@ The container runs without Linux capabilities, with a read-only root filesystem 
 - `GET /api/v1/stats`
 - `GET /api/v1/observations?minutes=60&limit=500`
 - `GET /api/v1/messages?minutes=60&limit=500`
+- `POST /api/v1/ingest` (authenticated physical collector)
 
 Accepted history windows are 5, 10, and 30 minutes; 1, 6, 12, and 24 hours; 7 days; and 1 month.
 

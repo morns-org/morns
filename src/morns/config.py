@@ -13,6 +13,7 @@ class Settings:
     host: str
     port: int
     simulator: bool
+    ingest_token: str | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -23,4 +24,5 @@ class Settings:
             host=os.getenv("MORNS_HOST", "127.0.0.1"),
             port=int(os.getenv("MORNS_PORT", "8787")),
             simulator=os.getenv("MORNS_SIMULATOR", "false").lower() in {"1", "true", "yes"},
+            ingest_token=os.getenv("MORNS_INGEST_TOKEN") or None,
         )
