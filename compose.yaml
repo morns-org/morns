@@ -4,8 +4,7 @@ services:
     environment:
       MORNS_DATABASE: /data/morns.db
       MORNS_HOST: 0.0.0.0
-      MORNS_STATION_NAME: MORNs QE Station
-      MORNS_SIMULATOR: "true"
+      MORNS_STATION_NAME: MORNs Station
     ports:
       - "8787:8787"
     volumes:

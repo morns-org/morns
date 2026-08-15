@@ -24,8 +24,15 @@ def create_app(settings: Settings | None = None, store: ObservationStore | None 
         return files("morns").joinpath("templates/dashboard.html").read_text(encoding="utf-8")
 
     @app.get("/health")
-    def health() -> dict[str, str]:
-        return {"status": "ok", "version": __version__, "station": settings.station_name}
+    def health() -> dict[str, str | bool | None]:
+        return {
+            "status": "ok",
+            "version": __version__,
+            "station": settings.station_name,
+            "simulator": settings.simulator,
+            "radio_configured": bool(settings.serial_port),
+            "serial_port": settings.serial_port,
+        }
 
     @app.get("/api/v1/stats")
     def stats() -> dict:

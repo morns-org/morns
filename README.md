@@ -74,13 +74,22 @@ pip install -e '.[test]'
 pytest --cov=morns
 ```
 
-Run the isolated container evaluation environment:
+Run MORNs normally (no generated observations):
 
 ```bash
 docker compose up --build -d --wait
 curl http://127.0.0.1:8787/health
 docker compose down -v
 ```
+
+Run the isolated simulator only when explicitly evaluating the interface:
+
+```bash
+docker compose -f compose.yaml -f compose.qe.yaml up --build -d --wait
+docker compose -f compose.yaml -f compose.qe.yaml down -v
+```
+
+Simulator mode is visibly disclosed by the health API and dashboard. Never use simulator observations for RF coverage analysis.
 
 The container runs without Linux capabilities, with a read-only root filesystem and a dedicated data volume. Automated agents should interact through a constrained QE controller rather than receiving unrestricted access to the Docker socket.
 

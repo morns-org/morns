@@ -13,7 +13,10 @@ def make_client(tmp_path):
 
 def test_health_and_dashboard(tmp_path):
     client, _ = make_client(tmp_path)
-    assert client.get("/health").json()["status"] == "ok"
+    health = client.get("/health").json()
+    assert health["status"] == "ok"
+    assert health["simulator"] is False
+    assert health["radio_configured"] is False
     page = client.get("/")
     assert page.status_code == 200
     assert "Public message history" in page.text
