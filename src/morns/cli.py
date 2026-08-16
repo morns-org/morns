@@ -29,6 +29,9 @@ def main() -> None:
         port=args.web_port or base.port,
         simulator=args.simulator or base.simulator,
         ingest_token=base.ingest_token,
+        station_latitude=base.station_latitude,
+        station_longitude=base.station_longitude,
+        station_radius_km=base.station_radius_km,
     )
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     store = ObservationStore(settings.database_path)
@@ -38,7 +41,13 @@ def main() -> None:
         collector = SimulatorCollector(store, settings.station_name)
         threading.Thread(target=collector.run, daemon=True).start()
     elif settings.serial_port:
-        collector = SerialCollector(store, settings.serial_port, settings.station_name)
+        collector = SerialCollector(
+            store,
+            settings.serial_port,
+            settings.station_name,
+            settings.station_latitude,
+            settings.station_longitude,
+        )
         collector.start()
     else:
         logging.warning("No radio selected; web interface is running in read-only mode")

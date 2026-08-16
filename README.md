@@ -10,7 +10,7 @@ This repository is an early MVP. It currently provides a single-station SQLite e
 
 - Direct Meshtastic serial ingestion
 - Append-only observation history in SQLite
-- Explicit `LORA`, `MQTT`, `IMPORT`, or `SIMULATOR` provenance
+- Explicit `LORA`, `LOCAL`, `MQTT`, `IMPORT`, or `SIMULATOR` provenance
 - Local health, statistics, observations, and message APIs
 - Browser dashboard with the requested time windows
 - Safe simulator mode for evaluation without a radio
@@ -19,6 +19,8 @@ This repository is an early MVP. It currently provides a single-station SQLite e
 - Native host collector for macOS/Linux radios feeding a Docker server
 
 MORNs logs decoded messages supplied by the connected device. It does not break Meshtastic encryption, obtain private keys, or decode channels the receiver does not belong to.
+
+MORNs is manufacturer-agnostic. RAK, Heltec, Seeed Studio, LilyGO, and other devices use the same Meshtastic protocol contract; manufacturer and model are setup metadata, not an allowlist. See [Receiver Setup](docs/RECEIVER_SETUP.md) for capability discovery and compatibility evidence rules. [Passport](docs/PASSPORT.md) is reserved for the planned personal device and travel-map feature.
 
 ## Try it safely
 

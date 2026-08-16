@@ -14,8 +14,11 @@ A release is not deployable merely because its dashboard starts. Every public re
 ## Platform gates
 
 - Raspberry Pi OS installation completes from the public repository.
-- A physical RAK4631 produces a `LORA` observation through direct Linux serial ingestion.
-- macOS native collector delivers a physical RAK4631 observation to the Docker server.
+- The current physical RAK4631 fixture produces a `LORA` observation through direct Linux serial ingestion.
+- The macOS native collector delivers an observation from the current physical RAK4631 fixture to the Docker server.
+- The compatibility matrix includes physical fixtures from at least two manufacturers before MORNs claims general hardware support.
+- No runtime behavior depends on a manufacturer allowlist; differences are capability- or transport-driven.
+- Unknown models that satisfy the Meshtastic transport and packet contract may enroll without a code change.
 - Collector authentication rejects missing and incorrect credentials.
 - Simulator, MQTT, import, and physical LoRa provenance remain distinguishable.
 

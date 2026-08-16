@@ -12,10 +12,19 @@ log = logging.getLogger(__name__)
 
 
 class SerialCollector:
-    def __init__(self, store: Any, port: str, receiver_id: str):
+    def __init__(
+        self,
+        store: Any,
+        port: str,
+        receiver_id: str,
+        receiver_latitude: float | None = None,
+        receiver_longitude: float | None = None,
+    ):
         self.store = store
         self.port = port
         self.receiver_id = receiver_id
+        self.receiver_latitude = receiver_latitude
+        self.receiver_longitude = receiver_longitude
         self.interface: Any = None
 
     def start(self) -> None:
@@ -27,7 +36,13 @@ class SerialCollector:
         log.info("Connected receiver %s on %s", self.receiver_id, self.port)
 
     def _on_receive(self, packet: dict[str, Any], interface: Any = None) -> None:
-        self.store.add(normalize_packet(packet, self.receiver_id))
+        active_interface = interface or self.interface
+        my_info = getattr(active_interface, "myInfo", None)
+        local_node_num = getattr(my_info, "my_node_num", None)
+        observation = normalize_packet(packet, self.receiver_id, local_node_num)
+        observation["receiver_latitude"] = self.receiver_latitude
+        observation["receiver_longitude"] = self.receiver_longitude
+        self.store.add(observation)
 
     def close(self) -> None:
         if self.interface is not None:
