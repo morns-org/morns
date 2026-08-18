@@ -4,7 +4,7 @@ MORNS is a local-first, protocol-agnostic observation platform. It records what 
 
 This repository is an early MVP. It currently provides a single-station SQLite event log and local dashboard. 
 
-##Future
+## Future
 Public federation, accounts, nationwide maps, encrypted MORNS Rooms, and automated device configuration are planned.
 
 ## What works now
