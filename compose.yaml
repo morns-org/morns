@@ -1,0 +1,30 @@
+services:
+  station:
+    build: .
+    environment:
+      MORNS_DATABASE: /data/morns.db
+      MORNS_HOST: 0.0.0.0
+      MORNS_STATION_NAME: MORNS Station
+      MORNS_INGEST_TOKEN: ${MORNS_INGEST_TOKEN:-}
+      MORNS_STATION_LATITUDE: ${MORNS_STATION_LATITUDE:-}
+      MORNS_STATION_LONGITUDE: ${MORNS_STATION_LONGITUDE:-}
+      MORNS_STATION_RADIUS_KM: ${MORNS_STATION_RADIUS_KM:-8}
+    ports:
+      - "127.0.0.1:8787:8787"
+    volumes:
+      - station-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health')"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+volumes:
+  station-data:

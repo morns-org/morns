@@ -1,0 +1,5 @@
+services:
+  station:
+    environment:
+      MORNS_STATION_NAME: MORNS QE Simulator
+      MORNS_SIMULATOR: "true"

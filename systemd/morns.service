@@ -1,0 +1,21 @@
+[Unit]
+Description=MORNS radio observation station
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=morns
+Group=morns
+EnvironmentFile=-/etc/morns/station.env
+ExecStart=@MORNS_INSTALL_DIR@/venv/bin/morns
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/morns
+
+[Install]
+WantedBy=multi-user.target
