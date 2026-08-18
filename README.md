@@ -2,7 +2,10 @@
 
 MORNS is a local-first, protocol-agnostic observation platform. It records what physically attached receivers and approved data adapters observe, preserves source provenance, and exposes a web interface for nodes, signals, messages, locations, and optional public-interest map layers. Meshtastic is the first supported radio adapter; MORNS is independent and is not affiliated with or endorsed by the Meshtastic project.
 
-This repository is an early MVP. It currently provides a single-station SQLite event log and local dashboard. Public federation, accounts, nationwide maps, encrypted MORNS Rooms, and automated device configuration are planned—not silently implied by this release.
+This repository is an early MVP. It currently provides a single-station SQLite event log and local dashboard. 
+
+##Future
+Public federation, accounts, nationwide maps, encrypted MORNS Rooms, and automated device configuration are planned.
 
 ## What works now
 
