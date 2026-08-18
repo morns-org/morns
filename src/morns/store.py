@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     longitude REAL,
     receiver_latitude REAL,
     receiver_longitude REAL,
+    ingress_transport TEXT,
     transport TEXT NOT NULL CHECK (transport IN ('LORA', 'LOCAL', 'MQTT', 'IMPORT', 'SIMULATOR')),
     raw_json TEXT NOT NULL
 )
@@ -36,6 +38,30 @@ CREATE TABLE IF NOT EXISTS receiver_setup (
     setup_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS local_collector_credentials (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    token_hash TEXT NOT NULL,
+    token_prefix TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+);
+CREATE TABLE IF NOT EXISTS node_mobility_state (
+    node_id TEXT PRIMARY KEY,
+    state TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    last_evaluated_at TEXT NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS node_mobility_transitions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_id TEXT NOT NULL,
+    from_state TEXT NOT NULL,
+    to_state TEXT NOT NULL,
+    detected_at TEXT NOT NULL,
+    evidence_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mobility_transitions_node_idx
+    ON node_mobility_transitions(node_id, detected_at DESC);
 """
 
 
@@ -53,6 +79,8 @@ class ObservationStore:
             for name in ("receiver_latitude", "receiver_longitude"):
                 if name not in columns:
                     db.execute(f"ALTER TABLE observations ADD COLUMN {name} REAL")
+            if "ingress_transport" not in columns:
+                db.execute("ALTER TABLE observations ADD COLUMN ingress_transport TEXT")
 
     @staticmethod
     def _migrate_transport_constraint(db: sqlite3.Connection) -> None:
@@ -60,16 +88,17 @@ class ObservationStore:
         old_columns = {row[1] for row in db.execute("PRAGMA table_info(observations)")}
         receiver_lat = "receiver_latitude" if "receiver_latitude" in old_columns else "NULL"
         receiver_lon = "receiver_longitude" if "receiver_longitude" in old_columns else "NULL"
+        ingress = "ingress_transport" if "ingress_transport" in old_columns else "NULL"
         db.execute("DROP TABLE IF EXISTS observations_v2")
         db.execute(CREATE_TABLE.format(table="observations_v2"))
         db.execute(
             f"""INSERT INTO observations_v2
             (id, received_at, receiver_id, packet_id, from_node, to_node, channel,
              portnum, message_text, rssi, snr, latitude, longitude,
-             receiver_latitude, receiver_longitude, transport, raw_json)
+             receiver_latitude, receiver_longitude, ingress_transport, transport, raw_json)
             SELECT id, received_at, receiver_id, packet_id, from_node, to_node, channel,
              portnum, message_text, rssi, snr, latitude, longitude,
-             {receiver_lat}, {receiver_lon}, transport, raw_json FROM observations"""
+             {receiver_lat}, {receiver_lon}, {ingress}, transport, raw_json FROM observations"""
         )
         db.execute("DROP TABLE observations")
         db.execute("ALTER TABLE observations_v2 RENAME TO observations")
@@ -100,6 +129,7 @@ class ObservationStore:
             "longitude": observation.get("longitude"),
             "receiver_latitude": observation.get("receiver_latitude"),
             "receiver_longitude": observation.get("receiver_longitude"),
+            "ingress_transport": observation.get("ingress_transport"),
             "transport": observation.get("transport", "LORA"),
             "raw_json": json.dumps(observation.get("raw", observation), separators=(",", ":"), default=str),
         }
@@ -108,10 +138,10 @@ class ObservationStore:
                 """INSERT INTO observations
                 (received_at, receiver_id, packet_id, from_node, to_node, channel,
                  portnum, message_text, rssi, snr, latitude, longitude,
-                 receiver_latitude, receiver_longitude, transport, raw_json)
+                 receiver_latitude, receiver_longitude, ingress_transport, transport, raw_json)
                 VALUES (:received_at, :receiver_id, :packet_id, :from_node, :to_node, :channel,
                  :portnum, :message_text, :rssi, :snr, :latitude, :longitude,
-                 :receiver_latitude, :receiver_longitude, :transport, :raw_json)""",
+                 :receiver_latitude, :receiver_longitude, :ingress_transport, :transport, :raw_json)""",
                 fields,
             )
             return int(cursor.lastrowid)
@@ -124,7 +154,182 @@ class ObservationStore:
                 f"SELECT * FROM observations WHERE received_at >= ?{extra} ORDER BY received_at DESC LIMIT ?",
                 (since, limit),
             ).fetchall()
-        return [dict(row) for row in rows]
+        results = []
+        for row in rows:
+            result = dict(row)
+            try:
+                raw = json.loads(result["raw_json"])
+            except (TypeError, ValueError):
+                raw = {}
+            hop_start = raw.get("hopStart")
+            hop_limit = raw.get("hopLimit")
+            result["hops_away"] = (
+                max(0, int(hop_start) - int(hop_limit or 0))
+                if hop_start is not None
+                else None
+            )
+            results.append(result)
+        return results
+
+    def nodes(self, minutes: int = 60) -> list[dict[str, Any]]:
+        """Build provenance-aware node records from retained physical RF observations."""
+        since = (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT * FROM observations
+                WHERE received_at >= ? AND transport = 'LORA' AND from_node IS NOT NULL
+                ORDER BY received_at ASC""",
+                (since,),
+            ).fetchall()
+        records: dict[str, dict[str, Any]] = {}
+        for sql_row in rows:
+            row = dict(sql_row)
+            node_id = row["from_node"]
+            record = records.setdefault(node_id, {
+                "node_id": node_id, "first_heard": row["received_at"], "last_heard": row["received_at"],
+                "observations": 0, "receivers": set(), "packet_types": set(), "best_rssi": None,
+                "latest_rssi": None, "latest_snr": None, "hops_away": None,
+                "long_name": None, "short_name": None, "hardware_model": None, "role": None,
+                "public_key_available": False, "battery_level": None, "voltage": None,
+                "uptime_seconds": None, "channel_utilization": None, "air_util_tx": None,
+                "latitude": None, "longitude": None, "altitude": None, "position_source": None,
+                "position_precision_bits": None, "position_updated_at": None,
+                "declared_updated_at": None, "telemetry_updated_at": None,
+            })
+            record["last_heard"] = row["received_at"]
+            record["observations"] += 1
+            record["receivers"].add(row["receiver_id"])
+            if row["portnum"]:
+                record["packet_types"].add(row["portnum"])
+            if row["rssi"] is not None:
+                record["latest_rssi"] = row["rssi"]
+                record["latest_snr"] = row["snr"]
+                record["best_rssi"] = max(record["best_rssi"] or -999, row["rssi"])
+            try:
+                raw = json.loads(row["raw_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                raw = {}
+            decoded = raw.get("decoded") or {}
+            if user := decoded.get("user"):
+                record.update({
+                    "long_name": user.get("longName") or user.get("long_name"),
+                    "short_name": user.get("shortName") or user.get("short_name"),
+                    "hardware_model": user.get("hwModel") or user.get("hw_model"),
+                    "role": user.get("role"),
+                    "public_key_available": bool(user.get("publicKey") or user.get("public_key")),
+                    "declared_updated_at": row["received_at"],
+                })
+            if telemetry := decoded.get("telemetry"):
+                metrics = telemetry.get("deviceMetrics") or telemetry.get("device_metrics") or {}
+                for source, target in (("batteryLevel", "battery_level"), ("voltage", "voltage"),
+                    ("uptimeSeconds", "uptime_seconds"), ("channelUtilization", "channel_utilization"),
+                    ("airUtilTx", "air_util_tx")):
+                    value = metrics.get(source, metrics.get(target))
+                    if value is not None:
+                        record[target] = value
+                record["telemetry_updated_at"] = row["received_at"]
+            if position := decoded.get("position"):
+                record.update({
+                    "latitude": row["latitude"], "longitude": row["longitude"],
+                    "altitude": position.get("altitude"),
+                    "position_source": position.get("locationSource") or position.get("location_source"),
+                    "position_precision_bits": position.get("precisionBits") or position.get("precision_bits"),
+                    "position_updated_at": row["received_at"],
+                })
+            hop_start = raw.get("hopStart")
+            hop_limit = raw.get("hopLimit")
+            if hop_start is not None:
+                record["hops_away"] = max(0, hop_start - (hop_limit or 0))
+        mobility = self.refresh_mobility_states()
+        result = []
+        for record in records.values():
+            record["receivers"] = sorted(record["receivers"])
+            record["packet_types"] = sorted(record["packet_types"])
+            record["mobility"] = mobility.get(record["node_id"], {
+                "state": "unknown", "changed_at": None, "evidence": {}, "transitions": []
+            })
+            result.append(record)
+        return sorted(result, key=lambda item: item["last_heard"], reverse=True)
+
+    def position_history(self, node_id: str, limit: int = 1000) -> list[dict[str, Any]]:
+        """Return every retained node-declared position, newest first."""
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT received_at, receiver_id, latitude, longitude, raw_json
+                FROM observations WHERE from_node = ? AND transport = 'LORA'
+                AND latitude IS NOT NULL AND longitude IS NOT NULL
+                ORDER BY received_at DESC LIMIT ?""",
+                (node_id, limit),
+            ).fetchall()
+        result = []
+        for row in rows:
+            try:
+                raw = json.loads(row["raw_json"] or "{}")
+            except (TypeError, json.JSONDecodeError):
+                raw = {}
+            position = (raw.get("decoded") or {}).get("position") or {}
+            result.append({
+                "received_at": row["received_at"], "receiver_id": row["receiver_id"],
+                "latitude": row["latitude"], "longitude": row["longitude"],
+                "altitude": position.get("altitude"),
+                "source": position.get("locationSource") or position.get("location_source"),
+                "precision_bits": position.get("precisionBits") or position.get("precision_bits"),
+            })
+        return result
+
+    def refresh_mobility_states(self) -> dict[str, dict[str, Any]]:
+        """Classify retained tracks and record meaningful state changes."""
+        with self.connect() as db:
+            node_rows = db.execute(
+                """SELECT DISTINCT from_node FROM observations WHERE transport='LORA'
+                AND latitude IS NOT NULL AND longitude IS NOT NULL AND from_node IS NOT NULL"""
+            ).fetchall()
+        result: dict[str, dict[str, Any]] = {}
+        for node_row in node_rows:
+            node_id = node_row["from_node"]
+            track = list(reversed(self.position_history(node_id)))
+            classification = _classify_mobility(track)
+            now = datetime.now(timezone.utc).isoformat()
+            with self.connect() as db:
+                previous = db.execute(
+                    "SELECT state, changed_at FROM node_mobility_state WHERE node_id=?", (node_id,)
+                ).fetchone()
+                old_state = previous["state"] if previous else "unknown"
+                changed_at = previous["changed_at"] if previous else now
+                new_state = classification["state"]
+                if new_state != "unknown" and new_state != old_state:
+                    changed_at = now
+                    db.execute(
+                        """INSERT INTO node_mobility_transitions
+                        (node_id, from_state, to_state, detected_at, evidence_json)
+                        VALUES (?, ?, ?, ?, ?)""",
+                        (node_id, old_state, new_state, now, json.dumps(classification["evidence"])),
+                    )
+                    old_state = new_state
+                elif previous:
+                    new_state = old_state
+                db.execute(
+                    """INSERT INTO node_mobility_state
+                    (node_id, state, changed_at, last_evaluated_at, evidence_json)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(node_id) DO UPDATE SET state=excluded.state,
+                    changed_at=excluded.changed_at, last_evaluated_at=excluded.last_evaluated_at,
+                    evidence_json=excluded.evidence_json""",
+                    (node_id, new_state, changed_at, now, json.dumps(classification["evidence"])),
+                )
+                transitions = db.execute(
+                    """SELECT from_state, to_state, detected_at, evidence_json
+                    FROM node_mobility_transitions WHERE node_id=? ORDER BY detected_at DESC""",
+                    (node_id,),
+                ).fetchall()
+            result[node_id] = {
+                "state": new_state, "changed_at": changed_at,
+                "evidence": classification["evidence"],
+                "transitions": [{**dict(item), "evidence": json.loads(item["evidence_json"])} for item in transitions],
+            }
+            for item in result[node_id]["transitions"]:
+                item.pop("evidence_json", None)
+        return result
 
     def stats(self) -> dict[str, Any]:
         with self.connect() as db:
@@ -134,9 +339,83 @@ class ObservationStore:
                 SUM(CASE WHEN transport = 'LORA' THEN 1 ELSE 0 END) rf_observations,
                 SUM(CASE WHEN transport = 'LOCAL' THEN 1 ELSE 0 END) local_events,
                 SUM(CASE WHEN transport = 'LORA' AND message_text IS NOT NULL THEN 1 ELSE 0 END) messages,
+                MIN(received_at) oldest_received_at,
                 MAX(received_at) last_received_at FROM observations"""
             ).fetchone()
         return dict(row)
+
+    def base_station_stats(self, minutes: int = 60) -> dict[str, Any]:
+        """Return measured station statistics for one explicit time window."""
+        since = "0001-01-01T00:00:00+00:00" if minutes == 0 else (
+            datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        ).isoformat()
+        bucket_seconds = 86400 if minutes == 0 else 300 if minutes <= 60 else 3600 if minutes <= 1440 else 86400
+        with self.connect() as db:
+            totals = dict(db.execute(
+                """SELECT COUNT(*) observations,
+                COUNT(DISTINCT CASE WHEN transport = 'LORA' THEN from_node END) nodes,
+                SUM(CASE WHEN transport = 'LORA' AND message_text IS NOT NULL THEN 1 ELSE 0 END) messages,
+                MIN(received_at) first_received_at,
+                MAX(received_at) last_received_at
+                FROM observations WHERE received_at >= ?""",
+                (since,),
+            ).fetchone())
+            buckets = db.execute(
+                """SELECT CAST(strftime('%s', received_at) AS INTEGER) / ? bucket,
+                COUNT(*) observations,
+                COUNT(DISTINCT CASE WHEN transport = 'LORA' THEN from_node END) nodes,
+                SUM(CASE WHEN transport = 'LORA' AND message_text IS NOT NULL THEN 1 ELSE 0 END) messages
+                FROM observations WHERE received_at >= ?
+                GROUP BY bucket""",
+                (bucket_seconds, since),
+            ).fetchall()
+            positioned = db.execute(
+                """SELECT from_node, latitude, longitude, receiver_latitude, receiver_longitude,
+                received_at FROM observations
+                WHERE received_at >= ? AND transport = 'LORA'
+                AND latitude IS NOT NULL AND longitude IS NOT NULL
+                AND receiver_latitude IS NOT NULL AND receiver_longitude IS NOT NULL""",
+                (since,),
+            ).fetchall()
+
+        farthest: dict[str, Any] | None = None
+        for row in positioned:
+            distance = _haversine_km(
+                row["receiver_latitude"], row["receiver_longitude"],
+                row["latitude"], row["longitude"],
+            )
+            if farthest is None or distance > farthest["distance_km"]:
+                farthest = {
+                    "node_id": row["from_node"],
+                    "distance_km": round(distance, 2),
+                    "received_at": row["received_at"],
+                }
+        return {
+            "window_minutes": minutes,
+            "bucket_minutes": bucket_seconds // 60,
+            **totals,
+            "peak_observations": max((row["observations"] for row in buckets), default=0),
+            "peak_nodes": max((row["nodes"] for row in buckets), default=0),
+            "peak_messages": max((row["messages"] or 0 for row in buckets), default=0),
+            "farthest_contact": farthest,
+        }
+
+    def enforce_retention(self, observation_days: int, message_days: int) -> dict[str, int]:
+        """Purge expired observations and irreversibly redact expired message content."""
+        now = datetime.now(timezone.utc)
+        observation_cutoff = (now - timedelta(days=observation_days)).isoformat()
+        message_cutoff = (now - timedelta(days=message_days)).isoformat()
+        with self.connect() as db:
+            redacted = db.execute(
+                """UPDATE observations SET message_text = NULL, raw_json = '{}'
+                WHERE received_at < ? AND message_text IS NOT NULL""",
+                (message_cutoff,),
+            ).rowcount
+            deleted = db.execute(
+                "DELETE FROM observations WHERE received_at < ?",
+                (observation_cutoff,),
+            ).rowcount
+        return {"messages_redacted": redacted, "observations_deleted": deleted}
 
     def get_setup(self) -> dict[str, Any] | None:
         with self.connect() as db:
@@ -163,3 +442,94 @@ class ObservationStore:
                 (json.dumps(saved, separators=(",", ":")), updated_at),
             )
         return {**saved, "updated_at": updated_at}
+
+    def save_local_collector_credential(self, token_hash: str, token_prefix: str) -> dict[str, Any]:
+        created_at = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            db.execute(
+                """INSERT INTO local_collector_credentials
+                (id, token_hash, token_prefix, created_at, last_used_at)
+                VALUES (1, ?, ?, ?, NULL)
+                ON CONFLICT(id) DO UPDATE SET token_hash=excluded.token_hash,
+                token_prefix=excluded.token_prefix, created_at=excluded.created_at, last_used_at=NULL""",
+                (token_hash, token_prefix, created_at),
+            )
+        return {"token_prefix": token_prefix, "created_at": created_at, "last_used_at": None}
+
+    def local_collector_credential(self) -> dict[str, Any] | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT token_hash, token_prefix, created_at, last_used_at FROM local_collector_credentials WHERE id=1"
+            ).fetchone()
+        return dict(row) if row else None
+
+    def mark_local_collector_used(self) -> None:
+        with self.connect() as db:
+            db.execute(
+                "UPDATE local_collector_credentials SET last_used_at=? WHERE id=1",
+                (datetime.now(timezone.utc).isoformat(),),
+            )
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius_km = 6371.0088
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    return radius_km * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _classify_mobility(track: list[dict[str, Any]]) -> dict[str, Any]:
+    """Conservatively label a track while excluding implausible location jumps."""
+    accepted: list[dict[str, Any]] = []
+    rejected = 0
+    for point in track:
+        try:
+            stamp = datetime.fromisoformat(point["received_at"])
+            lat, lon = float(point["latitude"]), float(point["longitude"])
+        except (KeyError, TypeError, ValueError):
+            rejected += 1
+            continue
+        candidate = {**point, "stamp": stamp, "latitude": lat, "longitude": lon}
+        if accepted:
+            previous = accepted[-1]
+            hours = (stamp - previous["stamp"]).total_seconds() / 3600
+            distance = _haversine_km(previous["latitude"], previous["longitude"], lat, lon)
+            if hours <= 0 or (distance > 2 and distance / hours > 250):
+                rejected += 1
+                continue
+        accepted.append(candidate)
+
+    evidence: dict[str, Any] = {
+        "retained_positions": len(track), "accepted_positions": len(accepted),
+        "rejected_as_implausible": rejected, "mobile_threshold_km": 1.0,
+        "static_radius_km": 0.25, "static_dwell_hours": 6,
+    }
+    if len(accepted) < 3:
+        return {"state": "unknown", "evidence": evidence}
+    span_hours = (accepted[-1]["stamp"] - accepted[0]["stamp"]).total_seconds() / 3600
+    max_displacement = max(
+        _haversine_km(a["latitude"], a["longitude"], b["latitude"], b["longitude"])
+        for index, a in enumerate(accepted) for b in accepted[index + 1:]
+    )
+    latest = accepted[-1]["stamp"]
+    recent = [point for point in accepted if (latest - point["stamp"]).total_seconds() <= 6 * 3600]
+    recent_span = (recent[-1]["stamp"] - recent[0]["stamp"]).total_seconds() / 3600 if len(recent) > 1 else 0
+    center_lat = sorted(point["latitude"] for point in recent)[len(recent) // 2]
+    center_lon = sorted(point["longitude"] for point in recent)[len(recent) // 2]
+    recent_radius = max(
+        (_haversine_km(center_lat, center_lon, point["latitude"], point["longitude"]) for point in recent),
+        default=0,
+    )
+    evidence.update({
+        "track_span_hours": round(span_hours, 2),
+        "max_displacement_km": round(max_displacement, 3),
+        "recent_dwell_hours": round(recent_span, 2),
+        "recent_radius_km": round(recent_radius, 3),
+    })
+    if len(recent) >= 3 and recent_span >= 6 and recent_radius <= 0.25:
+        return {"state": "potential_static", "evidence": evidence}
+    if span_hours >= (10 / 60) and max_displacement >= 1:
+        return {"state": "potential_mobile", "evidence": evidence}
+    return {"state": "unknown", "evidence": evidence}

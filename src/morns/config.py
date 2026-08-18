@@ -22,7 +22,7 @@ class Settings:
     def from_env(cls) -> "Settings":
         return cls(
             database_path=Path(os.getenv("MORNS_DATABASE", "morns.db")),
-            station_name=os.getenv("MORNS_STATION_NAME", "MORNs Station"),
+            station_name=os.getenv("MORNS_STATION_NAME", "MORNS Station"),
             serial_port=os.getenv("MORNS_SERIAL_PORT") or None,
             host=os.getenv("MORNS_HOST", "127.0.0.1"),
             port=int(os.getenv("MORNS_PORT", "8787")),

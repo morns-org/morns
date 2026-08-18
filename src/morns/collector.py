@@ -39,7 +39,9 @@ class SerialCollector:
         active_interface = interface or self.interface
         my_info = getattr(active_interface, "myInfo", None)
         local_node_num = getattr(my_info, "my_node_num", None)
-        observation = normalize_packet(packet, self.receiver_id, local_node_num)
+        observation = normalize_packet(
+            packet, self.receiver_id, local_node_num, ingress_transport="USB_SERIAL"
+        )
         observation["receiver_latitude"] = self.receiver_latitude
         observation["receiver_longitude"] = self.receiver_longitude
         self.store.add(observation)
@@ -74,6 +76,7 @@ class SimulatorCollector:
                 "latitude": 35.55 + random.uniform(-0.05, 0.05),
                 "longitude": -97.55 + random.uniform(-0.05, 0.05),
                 "transport": "SIMULATOR",
+                "ingress_transport": "SIMULATOR",
             })
 
     def close(self) -> None:

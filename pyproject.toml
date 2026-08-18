@@ -29,7 +29,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-morns = ["templates/*.html"]
+morns = ["templates/*.html", "data/*.zip", "data/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

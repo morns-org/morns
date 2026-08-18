@@ -13,7 +13,7 @@ from .store import ObservationStore
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="morns", description="Run a MORNs observation station")
+    parser = argparse.ArgumentParser(prog="morns", description="Run a MORNS observation station")
     parser.add_argument("--port", help="Meshtastic serial device, for example /dev/ttyACM0")
     parser.add_argument("--host", help="Web listen address")
     parser.add_argument("--web-port", type=int, help="Web listen port")

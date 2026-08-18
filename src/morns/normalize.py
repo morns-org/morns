@@ -5,7 +5,8 @@ from typing import Any
 
 
 def normalize_packet(
-    packet: dict[str, Any], receiver_id: str = "local", local_node_num: int | None = None
+    packet: dict[str, Any], receiver_id: str = "local", local_node_num: int | None = None,
+    ingress_transport: str | None = None,
 ) -> dict[str, Any]:
     decoded = packet.get("decoded") or {}
     position = decoded.get("position") or {}
@@ -27,6 +28,7 @@ def normalize_packet(
         "latitude": position.get("latitude") or position.get("latitudeI") and position["latitudeI"] / 1e7,
         "longitude": position.get("longitude") or position.get("longitudeI") and position["longitudeI"] / 1e7,
         "transport": "LOCAL" if local_node_num is not None and packet.get("from") == local_node_num else "LORA",
+        "ingress_transport": ingress_transport,
         "telemetry": telemetry,
         "raw": packet,
     }

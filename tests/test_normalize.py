@@ -35,6 +35,15 @@ def test_classifies_connected_devices_own_packet_as_local():
     assert result["transport"] == "LOCAL"
 
 
+def test_keeps_rf_transport_separate_from_collector_ingress():
+    result = normalize_packet(
+        {"from": 0xAABBCCDD, "decoded": {"portnum": "TEXT_MESSAGE_APP"}},
+        ingress_transport="USB_SERIAL",
+    )
+    assert result["transport"] == "LORA"
+    assert result["ingress_transport"] == "USB_SERIAL"
+
+
 def test_hardware_identity_does_not_affect_packet_normalization():
     packet = {"from": 0xAABBCCDD, "rxRssi": -90, "decoded": {"portnum": "NODEINFO_APP"}}
     rak = normalize_packet(packet, receiver_id="rak-fixture", local_node_num=1)

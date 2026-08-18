@@ -12,10 +12,10 @@ from .remote import HttpObservationSink
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="morns-collector",
-        description="Forward a locally attached Meshtastic radio to a MORNs server",
+        description="Forward a locally attached Meshtastic radio to a MORNS server",
     )
     parser.add_argument("--port", required=True, help="Serial device, such as /dev/cu.usbmodem1101")
-    parser.add_argument("--server", default="http://127.0.0.1:8787", help="MORNs server URL")
+    parser.add_argument("--server", default="http://127.0.0.1:8787", help="MORNS server URL")
     parser.add_argument("--token", required=True, help="Station ingest token")
     parser.add_argument("--receiver-id", required=True, help="Stable public receiver identifier")
     args = parser.parse_args()
