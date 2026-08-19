@@ -92,6 +92,61 @@ def test_dashboard_has_windowed_and_mobile_layouts(tmp_path):
     assert ".message-history-head{flex-direction:column" in page
 
 
+def test_messaging_center_is_truthful_locked_and_accessible(tmp_path):
+    client, _ = make_client(tmp_path)
+    page = client.get("/").text
+    assert 'id="messagingCenter"' in page
+    assert "messages:{title:'Messaging Center'" in page
+    assert "$('#messagingCenter').classList.toggle('active',isMessages)" in page
+    assert 'id="messageTargetType" disabled' in page
+    assert 'id="messageTarget" disabled' in page
+    assert 'id="reviewMessage" type="button" disabled' in page
+    assert "new TextEncoder().encode(draft.value).length" in page
+    assert "device payload limit unavailable" in page
+    assert 'aria-live="polite">0 UTF-8 bytes' in page
+    for state in (
+        "draft", "queued", "transmitting", "submitted-to-interface",
+        "destination-radio-acknowledged", "failed", "expired", "canceled", "unknown",
+    ):
+        assert f'<span class="pill">{state}</span>' in page
+    assert "does not prove local radio queueing or delivery" in page
+    assert "not a human delivery or read receipt" in page
+    assert "MORNS retries are manual and visible" in page
+    assert "radio-native retries may still occur inside Meshtastic" in page
+    assert "The MORNS server is offline" in page
+    assert ".messaging-layout{grid-template-columns:1fr}" in page
+    assert 'aria-label="Conversations"' in page
+    assert 'aria-label="Selected conversation and composer"' in page
+
+
+def test_radio_admin_and_safe_command_tools_are_read_only(tmp_path):
+    client, _ = make_client(tmp_path)
+    page = client.get("/").text
+    assert "manufacturer-agnostic inspection" in page
+    assert "capabilities reported by the selected attached device" in page
+    assert 'id="radioDeviceSelect" disabled' in page
+    for label in (
+        "Manufacturer / hardware", "Firmware", "Region", "Modem preset",
+        "Role", "Node name", "Channels", "Relevant modules",
+    ):
+        assert label in page
+    assert "Preview changes 🔒" in page
+    assert "Apply confirmed changes 🔒" in page
+    assert "Required rollback plan" in page
+    assert "capture the device's current supported configuration" in page
+    assert "commands.id='command-settings'" in page
+    assert "MORNS never executes shell commands from the browser" in page
+    assert "morns-backup --database /var/lib/morns/morns.db create" in page
+    assert "morns-backup --database /var/lib/morns/morns.db inspect" in page
+    assert "--confirm-offline" in page
+    assert "sudo systemctl stop morns" in page
+    assert "meshtastic --port /dev/ttyACM0 --info" in page
+    assert "No mutation command is generated" in page
+    assert "copyCollectorText(button,button.previousElementSibling)" in page
+    assert "fetch('/api/v1/shell" not in page
+    assert "eval(" not in page
+
+
 def test_message_api_does_not_return_non_messages(tmp_path):
     client, store = make_client(tmp_path)
     store.add({"receiver_id": "rx", "from_node": "!one", "transport": "LORA"})
