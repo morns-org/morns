@@ -22,6 +22,56 @@ def test_store_keeps_immutable_observations(tmp_path):
     assert store.stats()["nodes"] == 1
 
 
+def test_message_windows_are_rolling_utc_cutoffs_and_exclude_future_rows(tmp_path):
+    store = ObservationStore(tmp_path / "message-windows.db")
+    now = datetime(2026, 8, 18, 12, 0, tzinfo=timezone.utc)
+    samples = [
+        ("four-minutes", timedelta(minutes=4)),
+        ("six-minutes", timedelta(minutes=6)),
+        ("eleven-hours", timedelta(hours=11)),
+        ("thirteen-hours", timedelta(hours=13)),
+        ("twenty-three-hours", timedelta(hours=23)),
+        ("twenty-five-hours", timedelta(hours=25)),
+        ("six-days", timedelta(days=6)),
+        ("eight-days", timedelta(days=8)),
+        ("twenty-nine-days", timedelta(days=29)),
+        ("thirty-one-days", timedelta(days=31)),
+    ]
+    for node, age in samples:
+        store.add({
+            "received_at": (now - age).isoformat(), "receiver_id": "rx",
+            "from_node": f"!{node}", "transport": "LORA",
+            "portnum": "TEXT_MESSAGE_APP", "message_text": node,
+        })
+    store.add({
+        "received_at": (now + timedelta(minutes=1)).isoformat(), "receiver_id": "rx",
+        "from_node": "!future", "transport": "LORA",
+        "portnum": "TEXT_MESSAGE_APP", "message_text": "future",
+    })
+
+    def messages(minutes):
+        return [row["message_text"] for row in store.recent(
+            minutes=minutes, messages_only=True, now=now,
+        )]
+
+    assert messages(5) == ["four-minutes"]
+    assert messages(720) == ["four-minutes", "six-minutes", "eleven-hours"]
+    assert messages(1440) == [
+        "four-minutes", "six-minutes", "eleven-hours", "thirteen-hours",
+        "twenty-three-hours",
+    ]
+    assert messages(10080)[-2:] == ["twenty-five-hours", "six-days"]
+    assert messages(43200)[-2:] == ["eight-days", "twenty-nine-days"]
+    assert messages(0)[-1] == "thirty-one-days"
+    assert "future" not in messages(0)
+
+    summary = store.message_history_summary(minutes=720, now=now)
+    assert summary["selected_count"] == 3
+    assert summary["retained_count"] == len(samples)
+    assert summary["oldest_retained_at"] == (now - timedelta(days=31)).isoformat()
+    assert summary["newest_retained_at"] == (now - timedelta(minutes=4)).isoformat()
+
+
 def test_transport_provenance_is_enforced(tmp_path):
     store = ObservationStore(tmp_path / "test.db")
     try:

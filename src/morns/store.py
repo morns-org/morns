@@ -188,11 +188,13 @@ class ObservationStore:
         limit: int = 500,
         messages_only: bool = False,
         include_base_station_telemetry: bool = True,
+        now: datetime | None = None,
     ) -> list[dict[str, Any]]:
+        current = now or datetime.now(timezone.utc)
         since = (
             "0001-01-01T00:00:00+00:00"
             if minutes == 0
-            else (datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()
+            else (current - timedelta(minutes=minutes)).isoformat()
         )
         filters = (
             " AND message_text IS NOT NULL AND content_state = 'decoded_public_message'"
@@ -202,8 +204,8 @@ class ObservationStore:
             filters += " AND NOT (transport = 'LOCAL' AND portnum = 'TELEMETRY_APP')"
         with self.connect() as db:
             rows = db.execute(
-                f"SELECT * FROM observations WHERE received_at >= ?{filters} ORDER BY received_at DESC LIMIT ?",
-                (since, limit),
+                f"SELECT * FROM observations WHERE received_at >= ? AND received_at <= ?{filters} ORDER BY received_at DESC LIMIT ?",
+                (since, current.isoformat(), limit),
             ).fetchall()
         results = []
         for row in rows:
@@ -429,21 +431,26 @@ class ObservationStore:
         )
         return result
 
-    def message_history_summary(self, minutes: int = 60) -> dict[str, Any]:
+    def message_history_summary(
+        self, minutes: int = 60, now: datetime | None = None
+    ) -> dict[str, Any]:
         """Summarize retained decoded public-message content for history navigation."""
+        current = now or datetime.now(timezone.utc)
         since = "0001-01-01T00:00:00+00:00" if minutes == 0 else (
-            datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            current - timedelta(minutes=minutes)
         ).isoformat()
         with self.connect() as db:
             row = db.execute(
                 """SELECT
                 COALESCE(SUM(CASE WHEN received_at >= ? THEN 1 ELSE 0 END), 0) selected_count,
                 COUNT(*) retained_count,
+                MIN(received_at) oldest_retained_at,
                 MAX(received_at) newest_retained_at
                 FROM observations
                 WHERE content_state = 'decoded_public_message'
-                  AND message_text IS NOT NULL""",
-                (since,),
+                  AND message_text IS NOT NULL
+                  AND received_at <= ?""",
+                (since, current.isoformat()),
             ).fetchone()
         return {**dict(row), "window_minutes": minutes}
 

@@ -69,14 +69,17 @@ def test_dashboard_has_truthful_empty_states_and_page_defaults(tmp_path):
     assert "VIEW_METRIC_STORAGE='morns-view-metrics-v1'" in page
     assert "VIEW_TILE_STORAGE='morns-view-tiles-v1'" in page
     assert "Receiver status could not be refreshed" in page
-    assert 'data-minutes="0">All time</button>' in page
+    assert "[0,'All retained']" in page
     assert "retained decoded public message" in page
     assert "Encrypted or otherwise unreadable packets are not counted as messages." in page
     assert "recommendedMessageWindow" in page
     assert "/api/v1/messages/history-summary?minutes=${selected}" in page
     assert "availableMessageMinutes=[5]" in page
-    assert "n>0&&n<=historyMinutes" in page
-    assert "if(online)updateMessageWindows()" in page
+    assert "messageHistoryAgeMinutes(summary)" in page
+    assert "updateMessageWindows(messageSummary)" in page
+    assert "rolling window ending now" in page
+    assert "Past 12h" in page
+    assert "timeZone=stationHealth.server_timezone" in page
 
 
 def test_dashboard_has_windowed_and_mobile_layouts(tmp_path):
@@ -142,10 +145,16 @@ def test_message_history_summary_counts_only_retained_decoded_public_content(tmp
     assert summary["window_minutes"] == 5
     assert summary["selected_count"] == 0
     assert summary["retained_count"] == 1
+    assert summary["oldest_retained_at"] == older
     assert summary["newest_retained_at"] == older
     assert [row["message_text"] for row in client.get(
         "/api/v1/messages?minutes=0"
     ).json()] == ["retained"]
+
+
+def test_health_exposes_configured_timezone_for_message_display(tmp_path):
+    client, _ = make_client(tmp_path)
+    assert client.get("/health").json()["server_timezone"] == "UTC"
 
 
 def test_base_station_health_does_not_call_local_telemetry_rf(tmp_path):
