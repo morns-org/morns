@@ -429,6 +429,24 @@ class ObservationStore:
         )
         return result
 
+    def message_history_summary(self, minutes: int = 60) -> dict[str, Any]:
+        """Summarize retained decoded public-message content for history navigation."""
+        since = "0001-01-01T00:00:00+00:00" if minutes == 0 else (
+            datetime.now(timezone.utc) - timedelta(minutes=minutes)
+        ).isoformat()
+        with self.connect() as db:
+            row = db.execute(
+                """SELECT
+                COALESCE(SUM(CASE WHEN received_at >= ? THEN 1 ELSE 0 END), 0) selected_count,
+                COUNT(*) retained_count,
+                MAX(received_at) newest_retained_at
+                FROM observations
+                WHERE content_state = 'decoded_public_message'
+                  AND message_text IS NOT NULL""",
+                (since,),
+            ).fetchone()
+        return {**dict(row), "window_minutes": minutes}
+
     def base_station_stats(
         self,
         minutes: int = 60,

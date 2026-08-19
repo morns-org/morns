@@ -69,6 +69,11 @@ def test_dashboard_has_truthful_empty_states_and_page_defaults(tmp_path):
     assert "VIEW_METRIC_STORAGE='morns-view-metrics-v1'" in page
     assert "VIEW_TILE_STORAGE='morns-view-tiles-v1'" in page
     assert "Receiver status could not be refreshed" in page
+    assert 'data-minutes="0">All time</button>' in page
+    assert "retained decoded public message" in page
+    assert "Encrypted or otherwise unreadable packets are not counted as messages." in page
+    assert "recommendedMessageWindow" in page
+    assert "/api/v1/messages/history-summary?minutes=${selected}" in page
 
 
 def test_dashboard_has_windowed_and_mobile_layouts(tmp_path):
@@ -78,6 +83,7 @@ def test_dashboard_has_windowed_and_mobile_layouts(tmp_path):
     assert "@media(max-width:760px)" in page
     assert "@media(max-width:480px)" in page
     assert ".scroll table{min-width:720px}" in page
+    assert ".message-history-head{flex-direction:column" in page
 
 
 def test_message_api_does_not_return_non_messages(tmp_path):
@@ -109,6 +115,34 @@ def test_message_observability_api_does_not_label_encrypted_packets_as_chats(tmp
     assert body["encrypted_undecodable_packets"] == 1
     assert body["undecodable_packets"] == 1
     assert client.get("/api/v1/messages?minutes=60").json()[0]["message_text"] == "readable"
+
+
+def test_message_history_summary_counts_only_retained_decoded_public_content(tmp_path):
+    client, store = make_client(tmp_path)
+    older = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    redacted = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+    store.add({
+        "received_at": older, "receiver_id": "rx", "from_node": "!older",
+        "transport": "LORA", "portnum": "TEXT_MESSAGE_APP", "message_text": "retained",
+    })
+    store.add({
+        "received_at": redacted, "receiver_id": "rx", "from_node": "!redacted",
+        "transport": "LORA", "portnum": "TEXT_MESSAGE_APP", "message_text": "expired",
+    })
+    store.add({
+        "receiver_id": "rx", "from_node": "!private", "transport": "LORA",
+        "raw": {"encrypted": "not-readable-by-this-receiver"},
+    })
+    store.enforce_retention(observation_days=30, message_days=7)
+
+    summary = client.get("/api/v1/messages/history-summary?minutes=5").json()
+    assert summary["window_minutes"] == 5
+    assert summary["selected_count"] == 0
+    assert summary["retained_count"] == 1
+    assert summary["newest_retained_at"] == older
+    assert [row["message_text"] for row in client.get(
+        "/api/v1/messages?minutes=0"
+    ).json()] == ["retained"]
 
 
 def test_base_station_health_does_not_call_local_telemetry_rf(tmp_path):

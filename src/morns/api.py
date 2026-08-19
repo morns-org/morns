@@ -330,6 +330,13 @@ def create_app(settings: Settings | None = None, store: ObservationStore | None 
             minutes = 60
         return store.message_observability(minutes)
 
+    @app.get("/api/v1/messages/history-summary")
+    def message_history_summary(minutes: int = Query(60)) -> dict[str, Any]:
+        """Report only retained decoded public-message content available to browse."""
+        if minutes not in ALLOWED_WINDOWS:
+            minutes = 60
+        return store.message_history_summary(minutes)
+
     @app.get("/api/v1/nodes")
     def nodes(minutes: int = Query(60)) -> list[dict[str, Any]]:
         if minutes not in ALLOWED_WINDOWS:
