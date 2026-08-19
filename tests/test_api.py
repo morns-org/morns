@@ -74,6 +74,9 @@ def test_dashboard_has_truthful_empty_states_and_page_defaults(tmp_path):
     assert "Encrypted or otherwise unreadable packets are not counted as messages." in page
     assert "recommendedMessageWindow" in page
     assert "/api/v1/messages/history-summary?minutes=${selected}" in page
+    assert "availableMessageMinutes=[5]" in page
+    assert "n>0&&n<=historyMinutes" in page
+    assert "if(online)updateMessageWindows()" in page
 
 
 def test_dashboard_has_windowed_and_mobile_layouts(tmp_path):
